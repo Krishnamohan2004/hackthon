@@ -1,1 +1,89 @@
 
+name: Java CI Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  AWS_REGION: ap-northeast-1
+  ECR_REPOSITORY: devops-app-repo
+
+jobs:
+
+  build-scan-push:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: maven
+
+      - name: Build Maven
+        run: mvn clean install
+
+########################################
+# SonarQube Scan
+########################################
+
+      - name: SonarQube Scan
+        run: |
+          mvn sonar:sonar \
+          -Dsonar.projectKey=my-java-app \
+          -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} \
+          -Dsonar.login=${{ secrets.SONAR_TOKEN }}
+
+########################################
+# Configure AWS
+########################################
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+########################################
+# Login ECR
+########################################
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+########################################
+# Build Docker Image
+########################################
+
+      - name: Build Docker Image
+        run: |
+          docker build -t ${{ steps.login-ecr.outputs.registry }}/devops-app-repo:latest .
+
+########################################
+# Trivy Scan
+########################################
+
+      - name: Scan Image using Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.login-ecr.outputs.registry }}/devops-app-repo:latest
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: 0
+
+########################################
+# Push to ECR
+########################################
+
+      - name: Push Image to ECR
+        run: |
+          docker push ${{ steps.login-ecr.outputs.registry }}/devops-app-repo:latest
