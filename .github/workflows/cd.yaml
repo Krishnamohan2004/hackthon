@@ -17,9 +17,11 @@ jobs:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
 
     steps:
-      ########################################
-      # Configure AWS Credentials
-      ########################################
+
+########################################
+# Configure AWS Credentials
+########################################
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
@@ -27,34 +29,38 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      ########################################
-      # Install kubectl
-      ########################################
+########################################
+# Install kubectl
+########################################
+
       - name: Setup kubectl
         uses: azure/setup-kubectl@v3
         with:
           version: latest
 
-      ########################################
-      # Connect to EKS
-      ########################################
+########################################
+# Connect to EKS
+########################################
+
       - name: Update kubeconfig
         run: |
           aws eks update-kubeconfig \
             --region $AWS_REGION \
             --name $EKS_CLUSTER_NAME
 
-      ########################################
-      # Verify Cluster
-      ########################################
-      - name: Verify EKS Connection
-        run: |
-          kubectl get nodes
+########################################
+# Apply Kubernetes Manifest
+########################################
 
-      ########################################
-      # Deploy Application
-      ########################################
-      - name: Deploy to EKS
+      - name: Apply Kubernetes Files
         run: |
-          kubectl set image deployment/java-app \
-            java-app=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest
+          kubectl apply -f k8s/deployment.yaml
+
+########################################
+# Update Image
+########################################
+
+      - name: Deploy New Image
+        run: |
+          kubectl set image deployment/boardgame-deployment \
+            boardgame=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest
