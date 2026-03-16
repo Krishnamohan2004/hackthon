@@ -1,0 +1,60 @@
+name: Java CD Pipeline
+
+on:
+  workflow_run:
+    workflows: ["Java CI Pipeline"]
+    types:
+      - completed
+
+env:
+  AWS_REGION: ap-northeast-1
+  EKS_CLUSTER_NAME: ips-cluster
+  ECR_REPOSITORY: devops-app-repo
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      ########################################
+      # Configure AWS Credentials
+      ########################################
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      ########################################
+      # Install kubectl
+      ########################################
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: latest
+
+      ########################################
+      # Connect to EKS
+      ########################################
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region $AWS_REGION \
+            --name $EKS_CLUSTER_NAME
+
+      ########################################
+      # Verify Cluster
+      ########################################
+      - name: Verify EKS Connection
+        run: |
+          kubectl get nodes
+
+      ########################################
+      # Deploy Application
+      ########################################
+      - name: Deploy to EKS
+        run: |
+          kubectl set image deployment/java-app \
+            java-app=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest
