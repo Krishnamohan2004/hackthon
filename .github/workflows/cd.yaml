@@ -54,7 +54,7 @@ jobs:
 
       - name: Apply Kubernetes Files
         run: |
-          kubectl apply -f k8s/deployment.yaml
+          kubectl apply -f k8s/deployment-service.yaml
 
 ########################################
 # Update Image
@@ -62,5 +62,5 @@ jobs:
 
       - name: Deploy New Image  
         run: |
-          kubectl set image deployment/boardgame-deployment \
+          kubectl set image deployment-service/boardgame-deployment-service \
             boardgame=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest
