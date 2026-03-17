@@ -1,82 +1,87 @@
-# -------------------------------------------------------
-# DEPLOYMENT
-# -------------------------------------------------------
+name: Java CD Pipeline
 
-apiVersion: apps/v1
-kind: Deployment
+on:
+  workflow_run:
+    workflows: ["Java CI Pipeline"]
+    types:
+      - completed
 
-metadata:
-  name: boardgame-deployment
-  labels:
-    app: boardgame
+env:
+  AWS_REGION: ap-northeast-1
+  EKS_CLUSTER_NAME: ips-cluster
+  ECR_REPOSITORY: devops-app-repo
 
-spec:
-  replicas: 2
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
 
-  selector:
-    matchLabels:
-      app: boardgame
+    # Run only if CI pipeline succeeded
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
 
-  template:
+    steps:
 
-    metadata:
-      labels:
-        app: boardgame
+    ########################################
+    # Checkout Repository
+    ########################################
+    - name: Checkout code
+      uses: actions/checkout@v3
 
-    spec:
+    ########################################
+    # Configure AWS Credentials
+    ########################################
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
 
-      containers:
-      - name: boardgame
+    ########################################
+    # Install kubectl
+    ########################################
+    - name: Setup kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: latest
 
-        image: IMAGE_PLACEHOLDER
+    ########################################
+    # Connect to EKS Cluster
+    ########################################
+    - name: Update kubeconfig
+      run: |
+        aws eks update-kubeconfig \
+          --region $AWS_REGION \
+          --name $EKS_CLUSTER_NAME
 
-        imagePullPolicy: Always
+    ########################################
+    # Debug (Optional but useful)
+    ########################################
+    - name: Verify files
+      run: |
+        echo "Current directory:"
+        pwd
+        echo "Repo structure:"
+        ls -R
 
-        ports:
-        - containerPort: 8080
+    ########################################
+    # Replace IMAGE in YAML (IMPORTANT)
+    ########################################
+    - name: Replace image in manifest
+      run: |
+        IMAGE=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest
+        sed -i "s|IMAGE_PLACEHOLDER|$IMAGE|g" k8s/deployment-service.yaml
 
-        resources:
-          requests:
-            cpu: "100m"
-            memory: "128Mi"
-          limits:
-            cpu: "500m"
-            memory: "512Mi"
+    ########################################
+    # Deploy to Kubernetes
+    ########################################
+    - name: Apply Kubernetes manifests
+      run: |
+        kubectl apply -f k8s/deployment-service.yaml
 
-        livenessProbe:
-          httpGet:
-            path: /
-            port: 8080
-          initialDelaySeconds: 30
-          periodSeconds: 10
-
-        readinessProbe:
-          httpGet:
-            path: /
-            port: 8080
-          initialDelaySeconds: 10
-          periodSeconds: 5
-
----
-# -------------------------------------------------------
-# SERVICE
-# -------------------------------------------------------
-
-apiVersion: v1
-kind: Service
-
-metadata:
-  name: boardgame-service
-  labels:
-    app: boardgame
-
-spec:
-  type: LoadBalancer
-
-  selector:
-    app: boardgame
-
-  ports:
-  - protocol: TCP
-    port: 80
-    targetPort: 8080
+    ########################################
+    # Verify Deployment
+    ########################################
+    - name: Verify deployment
+      run: |
+        kubectl get pods
+        kubectl get svc
