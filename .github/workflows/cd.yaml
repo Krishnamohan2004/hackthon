@@ -14,53 +14,82 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
+    # Run only if CI succeeded
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
 
     steps:
 
-########################################
-# Configure AWS Credentials
-########################################
+    ########################################
+    # 1. Checkout Repository (MANDATORY)
+    ########################################
+    - name: Checkout code
+      uses: actions/checkout@v3
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+    ########################################
+    # 2. Debug Files (to avoid path issues)
+    ########################################
+    - name: Debug repo structure
+      run: |
+        echo "Current directory:"
+        pwd
+        echo "Listing all files:"
+        ls -R
 
-########################################
-# Install kubectl
-########################################
+    ########################################
+    # 3. Configure AWS Credentials
+    ########################################
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
 
-      - name: Setup kubectl
-        uses: azure/setup-kubectl@v3
-        with:
-          version: latest
+    ########################################
+    # 4. Install kubectl
+    ########################################
+    - name: Setup kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: latest
 
-########################################
-# Connect to EKS
-########################################
+    ########################################
+    # 5. Connect to EKS Cluster
+    ########################################
+    - name: Update kubeconfig
+      run: |
+        aws eks update-kubeconfig \
+          --region $AWS_REGION \
+          --name $EKS_CLUSTER_NAME
 
-      - name: Update kubeconfig
-        run: |
-          aws eks update-kubeconfig \
-            --region $AWS_REGION \
-            --name $EKS_CLUSTER_NAME
+    ########################################
+    # 6. Replace Image in YAML
+    ########################################
+    - name: Replace IMAGE placeholder
+      run: |
+        IMAGE=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest
+        
+        # Auto-detect file (prevents path errors)
+        FILE=$(find . -name "deployment-service.yaml")
+        echo "Using file: $FILE"
 
-########################################
-# Apply Kubernetes Manifest
-########################################
+        sed -i "s|IMAGE_PLACEHOLDER|$IMAGE|g" $FILE
 
-      - name: Apply Kubernetes Files
-        run: |
-          kubectl apply -f k8s/deployment-service.yaml
+    ########################################
+    # 7. Deploy to EKS
+    ########################################
+    - name: Apply Kubernetes manifests
+      run: |
+        FILE=$(find . -name "deployment-service.yaml")
+        echo "Applying file: $FILE"
+        kubectl apply -f $FILE
 
-########################################
-# Update Image
-########################################
-
-      - name: Deploy New Image  
-        run: |
-          kubectl set image deployment-service/boardgame-deployment-service \
-            boardgame=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest
+    ########################################
+    # 8. Verify Deployment
+    ########################################
+    - name: Verify deployment
+      run: |
+        kubectl get pods
+        kubectl get svc
+        kubectl rollout status deployment/boardgame-deployment
