@@ -61,7 +61,7 @@ jobs:
       run: |
         aws eks update-kubeconfig \
           --region $AWS_REGION \
-          --name $EKS_CLUSTER_NAME
+          --name $EKS_CLUSTER_NAME   
 
     ########################################
     # 6. Replace Image in YAML
