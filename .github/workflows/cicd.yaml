@@ -6,7 +6,7 @@ on:
       - main
 
 env:
-  AWS_REGION: ap-northeast-1
+  AWS_REGION: ap-northeast-1       
   ECR_REPOSITORY: devops-app-repo   
   EKS_CLUSTER_NAME: ips-cluster
 
