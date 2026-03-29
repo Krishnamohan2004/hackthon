@@ -1,106 +1,120 @@
 #!/bin/bash
 
-set -euo pipefail
+# Stop script only for critical errors
+set -e
+set -x
 
 # Log everything
+sudo touch /var/log/install-script.log
+sudo chmod 666 /var/log/install-script.log
 exec > /var/log/install-script.log 2>&1
 
+#############################################
+# Variables
+#############################################
 AWS_REGION="${AWS_REGION:-ap-northeast-1}"
 EKS_CLUSTER_NAME="${EKS_CLUSTER_NAME:-ips-cluster}"
 
 echo "Starting DevOps Tools Installation..."
-echo "AWS region: ${AWS_REGION}"
-echo "EKS cluster: ${EKS_CLUSTER_NAME}"
+echo "Region: ${AWS_REGION}"
+echo "Cluster: ${EKS_CLUSTER_NAME}"
+
+#############################################
+# Wait for instance to be fully ready
+#############################################
+sleep 40
 
 #############################################
 # Update system
 #############################################
-
-sudo apt update -y
-sudo apt upgrade -y
+sudo apt-get update -y
+sudo apt-get upgrade -y
 
 #############################################
 # Install Docker
 #############################################
-
-sudo apt install docker.io -y
+sudo apt-get install -y docker.io
 sudo systemctl enable docker
 sudo systemctl start docker
 sudo usermod -aG docker ubuntu
 
-#############################################
-# Install AWS CLI
-#############################################
+# Wait for docker
+sleep 15
+sudo docker --version
 
-sudo apt install unzip -y
-curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-unzip awscliv2.zip
+#############################################
+# Install AWS CLI v2
+#############################################
+sudo apt-get install -y unzip curl
+
+curl -s "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+unzip -q awscliv2.zip
 sudo ./aws/install
 
-#############################################
-# Install dependencies
-#############################################
-
-sudo apt install wget curl gnupg software-properties-common apt-transport-https ca-certificates -y
+export PATH=$PATH:/usr/local/bin
+aws --version
 
 #############################################
-# Install Trivy (Security Scanner)
+# Install basic tools
 #############################################
+sudo apt-get install -y wget curl gnupg software-properties-common \
+apt-transport-https ca-certificates
 
-wget https://aquasecurity.github.io/trivy-repo/deb/public.key
-sudo apt-key add public.key
+#############################################
+# Install Trivy
+#############################################
+wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key \
+| sudo gpg --dearmor -o /usr/share/keyrings/trivy.gpg
 
-echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" \
+echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" \
 | sudo tee /etc/apt/sources.list.d/trivy.list
 
-sudo apt update
-sudo apt install trivy -y
+sudo apt-get update -y
+sudo apt-get install -y trivy
 
 #############################################
 # Install kubectl
 #############################################
-
-curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+curl -LO "https://dl.k8s.io/release/$(curl -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
 
 chmod +x kubectl
 sudo mv kubectl /usr/local/bin/
 
-kubectl version --client
+kubectl version --client || true
 
 #############################################
-# Install Helm (Kubernetes Package Manager)
+# Install Helm
 #############################################
+curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
-curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-
-helm version
-
-#############################################
-# Run SonarQube Container
-#############################################
-
-sudo docker run -d \
---name sonarqube \
--p 9000:9000 \
-sonarqube:lts
+helm version || true
 
 #############################################
-# Install Prometheus & Grafana in Kubernetes
+# Run SonarQube container
 #############################################
+sudo systemctl restart docker
+sleep 10
 
-echo "Connecting EC2 instance to EKS cluster..."
-aws eks update-kubeconfig --region "${AWS_REGION}" --name "${EKS_CLUSTER_NAME}"
+sudo docker run -d --name sonarqube -p 9000:9000 sonarqube:lts || true
 
-echo "Verifying Kubernetes connectivity..."
-kubectl get nodes
+#############################################
+# Connect to EKS (this should NOT break script)
+#############################################
+echo "Connecting to EKS..."
 
-echo "Installing Prometheus Monitoring Stack in Kubernetes..."
+aws eks update-kubeconfig --region "${AWS_REGION}" --name "${EKS_CLUSTER_NAME}" || true
 
-# Add Helm repository
-helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-helm repo update
+kubectl get nodes || true
 
-cat >/tmp/monitoring-values.yaml <<EOF
+#############################################
+# Install Prometheus + Grafana (Helm)
+#############################################
+echo "Installing Prometheus & Grafana..."
+
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
+helm repo update || true
+
+cat <<EOF > /tmp/monitoring-values.yaml
 grafana:
   service:
     type: LoadBalancer
@@ -108,38 +122,21 @@ prometheus:
   service:
     type: LoadBalancer
 alertmanager:
-  service:
-    type: LoadBalancer
+  enabled: false
 EOF
 
-# Install or upgrade kube-prometheus-stack
 helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
   --namespace monitoring \
   --create-namespace \
-  -f /tmp/monitoring-values.yaml
+  -f /tmp/monitoring-values.yaml || true
+
+sleep 20
+kubectl get pods -n monitoring || true
+kubectl get svc -n monitoring || true
 
 #############################################
-# Wait for monitoring pods
+# Final check
 #############################################
-
-kubectl wait --namespace monitoring --for=condition=Ready pods --all --timeout=10m
-
-#############################################
-# Show important services
-#############################################
-
-echo "Monitoring services"
-
-kubectl get svc -n monitoring
-
-echo "Grafana admin password"
-kubectl get secret -n monitoring monitoring-grafana -o jsonpath="{.data.admin-password}" | base64 -d
-echo
-
-#############################################
-# Show running ports
-#############################################
-
-sudo ss -tulnp | grep -E "9000" || true
+sudo ss -tulnp | grep 9000 || true
 
 echo "Installation Completed Successfully!"

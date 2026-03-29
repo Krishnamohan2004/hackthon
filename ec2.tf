@@ -14,13 +14,27 @@ resource "aws_instance" "devops_vm" {
     Name = "DevOps-Agent"
   }
 
-  depends_on = [
-    aws_eks_node_group.main,
-    aws_eks_access_entry.devops_vm,
-    aws_eks_access_policy_association.devops_vm_admin
-  ]
+  #############################################
+  # WAIT FOR SSH (VERY IMPORTANT)
+  #############################################
+  provisioner "remote-exec" {
+    inline = [
+      "echo 'Waiting for instance to be ready...'",
+      "sleep 60"
+    ]
 
-  # Upload script to EC2
+    connection {
+      type        = "ssh"
+      user        = "ubuntu"
+      private_key = file("Bastion.pem")
+      host        = self.public_ip
+      timeout     = "5m"
+    }
+  }
+
+  #############################################
+  # COPY SCRIPT
+  #############################################
   provisioner "file" {
     source      = "install.sh"
     destination = "/home/ubuntu/install.sh"
@@ -33,7 +47,9 @@ resource "aws_instance" "devops_vm" {
     }
   }
 
-  # Execute the script
+  #############################################
+  # EXECUTE SCRIPT
+  #############################################
   provisioner "remote-exec" {
     inline = [
       "chmod +x /home/ubuntu/install.sh",
@@ -45,6 +61,7 @@ resource "aws_instance" "devops_vm" {
       user        = "ubuntu"
       private_key = file("Bastion.pem")
       host        = self.public_ip
+      timeout     = "10m"
     }
   }
 
