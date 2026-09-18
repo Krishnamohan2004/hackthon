@@ -8,6 +8,10 @@ resource "aws_instance" "devops_vm" {
   vpc_security_group_ids = [aws_security_group.devops_sg.id]
   iam_instance_profile   = aws_iam_instance_profile.devops_vm.name
 
+  depends_on = [
+    aws_eks_access_policy_association.devops_vm_admin
+  ]
+
   associate_public_ip_address = true
 
   tags = {

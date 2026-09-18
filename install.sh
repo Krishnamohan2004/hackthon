@@ -102,17 +102,23 @@ sudo docker run -d --name sonarqube -p 9000:9000 sonarqube:lts || true
 #############################################
 echo "Connecting to EKS..."
 
-aws eks update-kubeconfig --region "${AWS_REGION}" --name "${EKS_CLUSTER_NAME}" || true
+for attempt in {1..12}; do
+  if aws eks update-kubeconfig --region "${AWS_REGION}" --name "${EKS_CLUSTER_NAME}"; then
+    break
+  fi
+  echo "EKS access is not ready; retrying in 10 seconds (attempt ${attempt}/12)..."
+  sleep 10
+done
 
-kubectl get nodes || true
+kubectl get nodes
 
 #############################################
 # Install Prometheus + Grafana (Helm)
 #############################################
 echo "Installing Prometheus & Grafana..."
 
-helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
-helm repo update || true
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
 
 cat <<EOF > /tmp/monitoring-values.yaml
 grafana:
@@ -128,11 +134,11 @@ EOF
 helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
   --namespace monitoring \
   --create-namespace \
-  -f /tmp/monitoring-values.yaml || true
+  -f /tmp/monitoring-values.yaml
 
 sleep 20
-kubectl get pods -n monitoring || true
-kubectl get svc -n monitoring || true
+kubectl get pods -n monitoring
+kubectl get svc -n monitoring
 
 #############################################
 # Final check
