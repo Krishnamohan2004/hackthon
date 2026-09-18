@@ -151,7 +151,7 @@ resource "aws_eks_node_group" "main" {
     aws_subnet.public_subnet_2.id
   ]
 
-  instance_types = ["t3.medium"]
+  instance_types = ["m7i-flex.large"]
 
   scaling_config {
     desired_size = 2

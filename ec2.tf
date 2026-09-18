@@ -1,7 +1,7 @@
 resource "aws_instance" "devops_vm" {
 
-  ami           = "ami-0f65fc8c24ec8d2a1"
-  instance_type = "t3.large"
+  ami           = "ami-0126975fb247bf2e7"
+  instance_type = "m7i-flex.large"
   key_name      = "Bastion"
 
   subnet_id              = aws_subnet.public_subnet.id
@@ -52,6 +52,7 @@ resource "aws_instance" "devops_vm" {
   #############################################
   provisioner "remote-exec" {
     inline = [
+      "sudo sed -i 's/\\r$//' /home/ubuntu/install.sh",
       "chmod +x /home/ubuntu/install.sh",
       "sudo /home/ubuntu/install.sh"
     ]
